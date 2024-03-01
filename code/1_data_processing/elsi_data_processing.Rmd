@@ -1,0 +1,946 @@
+---
+title: "Internet use and mental health"
+author: "Yan Luo"
+date: '2023-10-01'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Make sure the working directory is "your path/internet-use-mental-health"
+knitr::opts_knit$set(root.dir = "D:/github_project/internet-use-mental-health")
+
+library(tidyverse)
+library(haven)
+library(sjlabelled)
+library(mice)
+library(tictoc)
+library(doParallel)
+
+```
+
+# Self-constructed functions
+
+```{r}
+
+reverse_code <- function(x) {
+  max_val <- max(x, na.rm = T)
+  return(max_val - x + 1)
+}
+
+```
+
+# Import data
+
+## 2015-2016 - 2019-2020 cohort core questionnaire
+
+```{r}
+
+# 2015-2016
+elsi_w1 <- read_dta(str_c(getwd(), "/data/raw/elsi/ELSI English (baseline) stata13.dta")) %>%
+  mutate(
+    .keep = "none",
+    ## Basic information
+    id, idhousehold, cohort = "elsi", country = 76, wave = 2015,
+    
+    ## Exposure variables
+    internet_yes = case_when(
+      p76 == 0 ~ "no",
+      p76 == 1 ~ "yes",
+      TRUE ~ NA_character_
+    ),
+    internet_yes = relevel(factor(internet_yes), ref = "no"),
+
+    ## Outcomes
+    depres = ifelse(r2 %in% c(8,9), NA, r2), effort = ifelse(r3 %in% c(8,9), NA, r3), 
+    sleepr = ifelse(r4 %in% c(8,9), NA, r4), whappy = ifelse(r5 %in% c(8,9), NA, 1-r5), 
+    flone = ifelse(r6 %in% c(8,9), NA, r6), enlife = ifelse(r7 %in% c(8,9), NA, 1-r7), 
+    fsad = ifelse(r8 %in% c(8,9), NA, r8), going = ifelse(r9 %in% c(8,9), NA, r9), # CES-D 8
+    shlt = case_when(
+      n1 %in% c(0,1) ~ 5,
+      n1 == 2 ~ 4,
+      n1 == 3 ~ 3,
+      n1 == 4 ~ 2,
+      n1 == 5 ~ 1,
+      TRUE ~ NA_real_
+    ), # self-rated health
+    satlife = ifelse(s18 %in% c(88,99), NA, s18), # Life satisfaction
+    
+    ## Covariates
+    # Demographics
+    age, 
+    male = ifelse(sex == 0, "female", "male"), male = relevel(factor(male), ref = "female"),
+    nonmarried = case_when(
+      e7 == 2 ~ "no",
+      e7 %in% c(1,3,4) ~ "yes",
+      TRUE ~ NA_character_
+      ),
+    nonmarried = relevel(factor(nonmarried), ref = "no"),
+    hhres = ar6, 
+    
+    # Socioeconomic status
+    atotb = assets,
+    lowedu = case_when(
+      e22 %in% c(15:18) ~ "tertiary",
+      e22 %in% c(10:14) ~ "secondary",
+      e22 %in% c(1:9) ~ "primary",
+      TRUE ~ NA_character_
+    ),
+    lowedu = relevel(factor(lowedu), ref = "tertiary"),
+    lbrf = case_when(
+      i1 == 1 ~ "employed",
+      i1 == 0 & i5 == 1 ~ "retired",
+      i1 == 0 & i5 %in% c(2:7) ~ "others",
+      TRUE ~ NA_character_
+    ), 
+    lbrf = relevel(factor(lbrf), ref = "employed"),
+
+    # Health Behaviors
+    smoken = case_when(
+      l30 == 3 ~ "no",
+      l30 %in% c(1:2) ~ "yes",
+      TRUE ~ NA_character_
+      ),
+    smoken = relevel(factor(smoken), ref = "no"),
+    weekdrink = case_when(
+      l24 %in% c(1:2) ~ "no",
+      l24 == 3 & l25 == 0 ~ "no",
+      l24 == 3 & l25 %in% c(1:7) ~ "yes",
+      TRUE ~ NA_character_
+    ),
+    weekdrink = relevel(factor(weekdrink), ref = "no"),
+    vgactx = ifelse(l9 == 9, NA, l9), mdactx = ifelse(l7 == 9, NA, l7), 
+    phyinact = case_when(
+      vgactx %in% c(1:7) | mdactx %in% c(1:7) ~ "no",
+      vgactx == 0 & mdactx == 0 ~ "yes",
+      TRUE ~ NA_character_
+    ),
+    phyinact = relevel(factor(phyinact), ref = "no"),
+    
+    # Physical health
+    hibpe = case_when(
+      n28 == 0 ~ 0,
+      n28 %in% c(1:2) ~ 1,
+      TRUE ~ NA_real_
+    ),
+    diabe = case_when(
+      n35 == 0 ~ 0,
+      n35 %in% c(1:2) ~ 1,
+      TRUE ~ NA_real_
+    ),
+    cancre = ifelse(n60 == 9, NA, n60), lunge = ifelse(n55 == 9, NA, n55), 
+    asthmae = ifelse(n54 == 9, NA, n54), arthre = ifelse(n56 == 9, NA, n56), 
+    hearte = case_when(
+      n46 == 1 | n48 == 1 | n50 == 1 ~ 1,
+      n46 == 9 & n48 == 9 & n50 == 9 ~ NA_real_,
+      TRUE ~ 0
+    ),
+    stroke = ifelse(n52 == 9, NA, n52),
+    psyche = ifelse(n59 == 9, NA, n59), parkine = ifelse(n62 == 9, NA, n62), 
+    alzhe = ifelse(n63 == 9, NA, n63), # Chronic diseases
+    psyche = factor(psyche, labels = c("no", "yes")), 
+    psyche = relevel(factor(psyche), ref = "no"),
+    parkine = factor(parkine, labels = c("no", "yes")), 
+    parkine = relevel(factor(parkine), ref = "no"),
+    alzhe = factor(alzhe, labels = c("no", "yes")), 
+    alzhe = relevel(factor(alzhe), ref = "no"),
+    
+    walkra = case_when(
+      p37 == 1 ~ 0,
+      p37 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ),
+    dressa = case_when(
+      p40 == 1 ~ 0,
+      p40 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ),
+    batha = case_when(
+      p43 == 1 ~ 0,
+      p43 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ),
+    eata = case_when(
+      p46 == 1 ~ 0,
+      p46 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ),
+    beda = case_when(
+      p49 == 1 ~ 0,
+      p49 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ),
+    toilta = case_when(
+      p55 == 1 ~ 0,
+      p55 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ), # ADLs
+    
+    mealsa = case_when(
+      p20 == 1 ~ 0,
+      p20 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ), 
+    moneya = case_when(
+      p22 == 1 ~ 0,
+      p22 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ), 
+    transporta = case_when(
+      p24 == 1 ~ 0,
+      p24 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ), 
+    shopa = case_when(
+      p26 == 1 ~ 0,
+      p26 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ), 
+    phonea = case_when(
+      p28 == 1 ~ 0,
+      p28 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ), 
+    medsa = case_when(
+      p30 == 1 ~ 0,
+      p30 %in% c(2:4) ~ 1,
+      TRUE ~ NA_real_
+    ) # IADLs
+  )
+
+# 2019-2020
+elsi_w2 <- read_dta(str_c(getwd(), "/data/raw/elsi/ELSI English (2nd wave) stata13.dta")) %>%
+  mutate(
+    .keep = "none",
+    ## Basic information
+    id = as.numeric(str_remove(id2, "2020")), idhousehold = idhousehold2, cohort = "elsi", country = 76, wave = 2019,
+    ## Exposure variables
+    internet_yes = case_when(
+      p76 == 0 ~ "no",
+      p76 == 1 ~ "yes",
+      TRUE ~ NA_character_
+    ),
+    internet_yes = relevel(factor(internet_yes), ref = "no"),
+
+    ## Outcomes
+    depres = ifelse(r2 %in% c(8,9), NA, r2), effort = ifelse(r3 %in% c(8,9), NA, r3), 
+    sleepr = ifelse(r4 %in% c(8,9), NA, r4), whappy = ifelse(r5 %in% c(8,9), NA, 1-r5), 
+    flone = ifelse(r6 %in% c(8,9), NA, r6), enlife = ifelse(r7 %in% c(8,9), NA, 1-r7), 
+    fsad = ifelse(r8 %in% c(8,9), NA, r8), going = ifelse(r9 %in% c(8,9), NA, r9), # CES-D 8
+    shlt = case_when(
+      n1 %in% c(0,1) ~ 5,
+      n1 == 2 ~ 4,
+      n1 == 3 ~ 3,
+      n1 == 4 ~ 2,
+      n1 == 5 ~ 1,
+      TRUE ~ NA_real_
+    ), # self-rated health
+    satlife = ifelse(s18 %in% c(88,99), NA, s18), # Life satisfaction
+    
+    ## Covariates
+    # Demographics
+    age, 
+    male = ifelse(sex == 0, "female", "male"), male = relevel(factor(male), ref = "female"),
+    nonmarried = case_when(
+      e7 == 2 ~ "no",
+      e7 %in% c(1,3,4) ~ "yes",
+      TRUE ~ NA_character_
+      ),
+    nonmarried = relevel(factor(nonmarried), ref = "no"),
+    hhres = nresidents, 
+    
+    # Socioeconomic status
+    atotb = assets,
+    lowedu = case_when(
+      e22 %in% c(15:18) ~ "tertiary",
+      e22 %in% c(10:14) ~ "secondary",
+      e22 %in% c(1:9) ~ "primary",
+      TRUE ~ NA_character_
+    ),
+    lowedu = relevel(factor(lowedu), ref = "tertiary"),
+    lbrf = case_when(
+      i0_28 == 1 ~ "employed",
+      i0_28 == 0 & i0_30 == 1 ~ "retired",
+      i0_1 == 0 | (i0_28 == 0 & i0_30 %in% c(2:7)) ~ "others",
+      TRUE ~ NA_character_
+    ), 
+    lbrf = relevel(factor(lbrf), ref = "employed"),
+
+    # Health behaviors
+    smoken = case_when(
+      l30_0 == 2 ~ "no",
+      l30_0 == 1 & l30 == 3 ~ "no",
+      l30_0 == 1 & l30 %in% c(1:2) ~ "yes",
+      TRUE ~ NA_character_
+      ),
+    smoken = relevel(factor(smoken), ref = "no"),
+    weekdrink = case_when(
+      l24 %in% c(1:2) ~ "no",
+      l24 == 3 & l25 == 0 ~ "no",
+      l24 == 3 & l25 %in% c(1:7) ~ "yes",
+      TRUE ~ NA_character_
+    ),
+    weekdrink = relevel(factor(weekdrink), ref = "no"),
+    vgactx = ifelse(l9 == 9, NA, l9), mdactx = ifelse(l7 == 9, NA, l7), 
+    phyinact = case_when(
+      vgactx %in% c(1:7) | mdactx %in% c(1:7) ~ "no",
+      vgactx == 0 & mdactx == 0 ~ "yes",
+      TRUE ~ NA_character_
+    ),
+    phyinact = relevel(factor(phyinact), ref = "no"),
+    
+    # Physical health
+    hibpe = case_when(
+      n28 == 0 ~ 0,
+      n28 %in% c(1:2) ~ 1,
+      TRUE ~ NA_real_
+    ),
+    diabe = case_when(
+      n35 == 0 ~ 0,
+      n35 %in% c(1:2) ~ 1,
+      TRUE ~ NA_real_
+    ),
+    cancre = ifelse(n60 == 9, NA, n60), lunge = ifelse(n55 == 9, NA, n55), 
+    asthmae = ifelse(n54 == 9, NA, n54), arthre = ifelse(n56 == 9, NA, n56), 
+    hearte = case_when(
+      n46 == 1 | n48 == 1 | n50 == 1 ~ 1,
+      n46 == 9 & n48 == 9 & n50 == 9 ~ NA_real_,
+      TRUE ~ 0
+    ),
+    stroke = ifelse(n52 == 9, NA, n52),
+    psyche = ifelse(n59 == 9, NA, n59), parkine = ifelse(n62 == 9, NA, n62), 
+    alzhe = ifelse(n63 == 9, NA, n63), # Chronic diseases
+    psyche = factor(psyche, labels = c("no", "yes")), 
+    psyche = relevel(factor(psyche), ref = "no"),
+    parkine = factor(parkine, labels = c("no", "yes")), 
+    parkine = relevel(factor(parkine), ref = "no"),
+    alzhe = factor(alzhe, labels = c("no", "yes")), 
+    alzhe = relevel(factor(alzhe), ref = "no"),
+    
+    walkra = case_when(
+      p37 == 0 ~ 0,
+      p37 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    dressa = case_when(
+      p40 == 0 ~ 0,
+      p40 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    batha = case_when(
+      p43 == 0 ~ 0,
+      p43 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    eata = case_when(
+      p46 == 0 ~ 0,
+      p46 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    beda = case_when(
+      p49 == 0 ~ 0,
+      p49 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    toilta = case_when(
+      p55 == 0 ~ 0,
+      p55 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ), # ADLs
+    
+    mealsa = case_when(
+      p20 == 0 ~ 0,
+      p20 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ), 
+    moneya = case_when(
+      p22 == 0 ~ 0,
+      p22 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ), 
+    transporta = case_when(
+      p24 == 0 ~ 0,
+      p24 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ), 
+    shopa = case_when(
+      p26 == 0 ~ 0,
+      p26 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ), 
+    phonea = case_when(
+      p28 == 0 ~ 0,
+      p28 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ), 
+    medsa = case_when(
+      p30 == 0 ~ 0,
+      p30 == 1 ~ 1,
+      TRUE ~ NA_real_
+    ) # IADLs
+  )
+
+```
+
+
+# Variable definition
+
+```{r}
+
+# Define variables
+tidy_elsi <- bind_rows(elsi_w1, elsi_w2) %>%
+  rowwise() %>%
+  mutate(
+    dis = sum(c(hibpe, diabe, cancre, lunge, hearte, stroke, arthre), na.rm = T),
+    dis_miss = sum(is.na(c(hibpe, diabe, cancre, lunge, hearte, stroke, arthre)), na.rm = F),
+    adl = sum(c(dressa, batha, eata, beda, toilta, walkra), na.rm = T),
+    adl_miss = sum(is.na(c(dressa, batha, eata, beda, toilta, walkra)), na.rm = F),
+    iadl = sum(c(moneya, medsa, shopa, mealsa, phonea), na.rm = T),
+    iadl_miss = sum(is.na(c(moneya, medsa, shopa, mealsa, phonea)), na.rm = F),
+  ) %>%
+  ungroup() %>%
+  mutate(
+    iwy = NA, iwm = NA,
+    dis = ifelse(dis_miss == 7, NA, dis), 
+    adl = ifelse(adl_miss == 6, NA, adl),
+    iadl = ifelse(iadl_miss == 5, NA, iadl),
+    adl_any = ifelse(adl == 0, "no", "yes"), adl_any = relevel(factor(adl_any), ref = "no")
+  ) %>%
+  remove_all_labels() %>%
+  zap_formats()
+
+rm(elsi_w1, elsi_w2)
+
+length(unique(tidy_elsi$id)) # 9949
+
+```
+
+
+# Generate analytic samples
+
+## Internet use (yes/no)
+
+```{r}
+
+# Keep participants aged >=50 years
+id_50plus <- tidy_elsi %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  filter(age >= 50) %>%
+  pull(id)
+
+filter_50plus <- tidy_elsi %>%
+  filter(id %in% id_50plus)
+length(unique(filter_50plus$id)) # 9949
+
+# Keep participants with complete data on internet use at baseline
+id_iyes <- filter_50plus %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  filter(!is.na(internet_yes)) %>%
+  pull(id)
+
+filter_iyes <- filter_50plus %>%
+  filter(id %in% id_iyes)
+length(unique(filter_iyes$id)) # 9945
+
+# Keep participants with complete data on outcomes at baseline
+## Depressive symptoms
+id_cesd_bl <- filter_iyes %>%
+  rowwise() %>%
+  mutate(
+    cesd_miss = sum(is.na(c(depres, flone, effort, sleepr, whappy, fsad, going, enlife)), na.rm = F)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    with_cesd = ifelse(cesd_miss == 0, 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  filter(with_cesd == 1) %>% 
+  ungroup() %>%
+  pull(id)
+
+## Self-rated health
+id_shlt_bl <- filter_iyes %>%
+  mutate(
+    with_shlt = ifelse(!is.na(shlt), 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  filter(with_shlt == 1) %>% 
+  ungroup() %>%
+  pull(id)
+
+## Life satisfaction
+id_satlife_bl <- filter_iyes %>%
+  mutate(
+    with_satlife = ifelse(!is.na(satlife), 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  filter(with_satlife == 1) %>% 
+  ungroup() %>%
+  pull(id)
+
+id_ot_bl <- intersect(id_cesd_bl, id_shlt_bl) # 8783
+id_ot_bl <- intersect(id_ot_bl, id_satlife_bl) # 8629
+
+filter_ot_bl <- filter_iyes %>%
+  filter(id %in% id_ot_bl)
+length(unique(filter_ot_bl$id)) # 8629
+
+# Keep participants with at least one-wave complete data on outcomes over follow-ups
+id_2obs <- filter_ot_bl %>%
+  group_by(id) %>%
+  filter(n() >= 2) %>%
+  dplyr::slice(1) %>%
+  ungroup() %>%
+  pull(id)
+
+filter_2obs <- filter_ot_bl %>%
+  filter(id %in% id_2obs)
+length(unique(filter_2obs$id)) # 8136
+
+## Depressive symptoms
+id_cesd <- filter_2obs %>%
+  rowwise() %>%
+  mutate(
+    cesd_miss = sum(is.na(c(depres, flone, effort, sleepr, whappy, fsad, going, enlife)), na.rm = F)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    with_cesd = ifelse(cesd_miss == 0, 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(2:n()) %>%
+  mutate(
+    t_with_cesd = cumsum(with_cesd)
+    ) %>%
+  slice(n()) %>%
+  filter(t_with_cesd >= 1) %>% 
+  ungroup() %>%
+  pull(id)
+
+## Self-rated health
+id_shlt <- filter_2obs %>%
+  mutate(
+    with_shlt = ifelse(!is.na(shlt), 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(2:n()) %>%
+  mutate(
+    t_with_shlt = cumsum(with_shlt)
+    ) %>%
+  slice(n()) %>%
+  filter(t_with_shlt >= 1) %>% 
+  ungroup() %>%
+  pull(id)
+
+## Life satisfaction
+id_satlife <- filter_2obs %>%
+  mutate(
+    with_satlife = ifelse(!is.na(satlife), 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(2:n()) %>%
+  mutate(
+    t_with_satlife = cumsum(with_satlife)
+    ) %>%
+  slice(n()) %>%
+  filter(t_with_satlife >= 1) %>% 
+  ungroup() %>%
+  pull(id)
+
+id_ot <- intersect(id_cesd, id_shlt) # 7056
+id_ot <- intersect(id_ot, id_satlife) # 6775
+
+filter_ot <- filter_2obs %>%
+  filter(id %in% id_ot)
+length(unique(filter_ot$id)) # 6775
+
+# Keep participants without dementia and psychological diseases at baseline
+id_mental <- filter_ot %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  filter(parkine == "yes" | alzhe == "yes" | psyche == "yes") %>%
+  pull(id)
+
+filter_nomental <- filter_ot %>%
+  filter(!id %in% id_mental) 
+length(unique(filter_nomental$id)) # 5529
+
+# Keep participants with complete data on covariates at baseline
+id_cov <- filter_nomental %>%
+  rowwise() %>%
+  mutate(
+    cov_miss = sum(is.na(c(age, male, atotb, lowedu, lbrf, nonmarried, hhres, smoken, weekdrink, phyinact, dis, adl_any, iadl)), na.rm = F)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    with_cov = ifelse(cov_miss == 0, 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  filter(with_cov == 1) %>%
+  pull(id)
+
+filter_cov <- filter_ot %>%
+  filter(id %in% id_cov) %>%
+  rowwise() %>%
+  mutate(
+    cesd = sum(c(depres, flone, effort, sleepr, whappy, fsad, going, enlife), na.rm = F)
+  ) %>%
+  ungroup()
+length(unique(filter_cov$id)) # 4178
+
+table(filter_cov %>% group_by(id) %>% summarise(count = n()) %>% pull(count))
+
+# Final
+bl <- filter_cov %>% 
+  group_by(id) %>% 
+  slice(1) %>%
+  ungroup() %>%
+  mutate(
+    .keep = "none",
+    id, internet_yes, 
+    age, male, lowedu, lowwealth = factor(reverse_code(ntile(atotb, 4))), lbrf, 
+    nonmarried, hhres, smoken, weekdrink, phyinact,
+    dis, adl_any, iadl
+    )
+
+final <- filter_cov %>%
+  group_by(id) %>%
+  mutate(
+    fisrt = first(wave),
+    cwave = wave - fisrt
+  ) %>%
+  ungroup() %>%
+  mutate(
+    .keep = "none",
+    id, country, iwy, iwm, wave,
+    cesd, shlt, satlife, 
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife),
+    cwave
+  ) %>%
+  dplyr::select(
+    id, country, iwy, iwm, wave,
+    cesd, shlt, satlife,
+    cesd_stand, shlt_stand, satlife_stand,
+    cwave
+  )
+
+final_iyes_elsi <- final %>% 
+  left_join(., bl, by = "id") %>%
+  mutate(
+    id = str_c("elsi_", id)
+  )
+
+rm(bl, final)
+rm(list = ls()[str_detect(string = ls(), pattern = "id_")])
+rm(list = ls()[str_detect(string = ls(), pattern = "filter_")])
+
+```
+
+# Subgroup analyses: Internet use (yes/no)
+
+## By age
+
+```{r}
+
+# 50-64 years
+middle_iyes_elsi <- final_iyes_elsi %>%
+  filter(age < 65) %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# ≥65 years
+old_iyes_elsi <- final_iyes_elsi %>%
+  filter(age >= 65) %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+## By gender
+
+```{r}
+
+# Male
+male_iyes_elsi <- final_iyes_elsi %>%
+  filter(male == "male") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# Female
+female_iyes_elsi <- final_iyes_elsi %>%
+  filter(male == "female") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+## By marital status
+
+```{r}
+
+# Married
+married_iyes_elsi <- final_iyes_elsi %>%
+  filter(nonmarried == "no") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# Unmarried
+nonmarried_iyes_elsi <- final_iyes_elsi %>%
+  filter(nonmarried == "yes") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+## By education
+
+```{r}
+
+# Primary
+pedu_iyes_elsi <- final_iyes_elsi %>%
+  filter(lowedu == "primary") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# Secondary
+sedu_iyes_elsi <- final_iyes_elsi %>%
+  filter(lowedu == "secondary") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# Tertiary
+tedu_iyes_elsi <- final_iyes_elsi %>%
+  filter(lowedu == "tertiary") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+## By household wealth
+
+```{r}
+
+# Low
+lwealth_iyes_elsi <- final_iyes_elsi %>%
+  filter(lowwealth == 3) %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# Middle
+mwealth_iyes_elsi <- final_iyes_elsi %>%
+  filter(lowwealth == 2) %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# High
+hwealth_iyes_elsi <- final_iyes_elsi %>%
+  filter(lowwealth == 1) %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+## By labor force status
+
+```{r}
+
+# Working
+work_iyes_elsi <- final_iyes_elsi %>%
+  filter(lbrf == "employed") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# Retired
+retired_iyes_elsi <- final_iyes_elsi %>%
+  filter(lbrf == "retired") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# Others
+others_iyes_elsi <- final_iyes_elsi %>%
+  filter(lbrf == "others") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+## By current smoking 
+
+```{r}
+
+# Current smoking
+smoke_iyes_elsi <- final_iyes_elsi %>%
+  filter(smoken == "yes") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# No smoking
+nosmoke_iyes_elsi <- final_iyes_elsi %>%
+  filter(smoken == "no") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+## By alcohol consumption
+
+```{r}
+
+# Weekly alcohol use
+drink_iyes_elsi <- final_iyes_elsi %>%
+  filter(weekdrink == "yes") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# Less than weekly alcohol use
+nodrink_iyes_elsi <- final_iyes_elsi %>%
+  filter(weekdrink == "no") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+
+```
+
+## By physical activity
+
+```{r}
+
+# Physical inactivity
+phyinact_iyes_elsi <- final_iyes_elsi %>%
+  filter(phyinact == "yes") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# Physical activity
+phyact_iyes_elsi <- final_iyes_elsi %>%
+  filter(phyinact == "no") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+## By ADL disability
+
+```{r}
+
+# ADL disability
+adl_iyes_elsi <- final_iyes_elsi %>%
+  filter(adl_any == "yes") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# No ADL limitation
+noadl_iyes_elsi <- final_iyes_elsi %>%
+  filter(adl_any == "no") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+## By chronic conditions
+
+```{r}
+
+# ≥1 chronic conditions
+dis_iyes_elsi <- final_iyes_elsi %>%
+  filter(dis > 0) %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# No chronic conditions
+nodis_iyes_elsi <- final_iyes_elsi %>%
+  filter(dis == 0) %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+
+# Sentivity analyses: Multiple imputation
+
+## Internet use (yes/no)
+
+```{r}
+
+# There is no missing value in this dataset
+
+```
+
+# Save data
+
+```{r}
+
+save(
+  final_iyes_elsi, # Main analyses
+  middle_iyes_elsi, old_iyes_elsi, male_iyes_elsi, female_iyes_elsi,
+  pedu_iyes_elsi, sedu_iyes_elsi, tedu_iyes_elsi,
+  lwealth_iyes_elsi, mwealth_iyes_elsi, hwealth_iyes_elsi,
+  work_iyes_elsi, retired_iyes_elsi, others_iyes_elsi,
+  smoke_iyes_elsi, nosmoke_iyes_elsi, drink_iyes_elsi, nodrink_iyes_elsi,
+  married_iyes_elsi, nonmarried_iyes_elsi,
+  phyinact_iyes_elsi, phyact_iyes_elsi, adl_iyes_elsi, noadl_iyes_elsi,
+  dis_iyes_elsi, nodis_iyes_elsi, # Subgroup analyses
+  file = str_c(getwd(), "/data/processed/elsi_processed_data.RData", sep = "")
+  )
+
+```
