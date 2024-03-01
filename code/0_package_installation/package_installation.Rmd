@@ -1,0 +1,53 @@
+---
+title: "Internet use and mental health"
+author: "Yan Luo"
+date: '2023-10-01'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# CRAN packages
+
+```{r}
+
+# xx_data_processing.Rmd
+install.packages("tidyverse")
+install.packages("haven")
+install.packages("sjlabelled")
+install.packages("mice")
+install.packages("tictoc")
+install.packages("doParallel")
+
+# analysis.Rmd
+install.packages("readxl")
+install.packages("gtsummary")
+install.packages("forestploter")
+install.packages("ggplot2")
+install.packages("ggpubr")
+install.packages("ggtext")
+install.packages("lmerTest")
+install.packages("metafor")
+
+```
+
+# Github packages
+
+```{r}
+
+if (!requireNamespace("devtools", quietly = TRUE)) {
+  # If not installed, install devtools
+  install.packages("devtools")
+}
+
+library(devtools)
+
+devtools::install_github("ropensci/skimr")
+devtools::install_github("thomasp85/patchwork")
+devtools::install_github("tidyverse/glue")
+
+```
+
