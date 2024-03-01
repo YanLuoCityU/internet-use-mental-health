@@ -40,3 +40,11 @@ All codes were originally processed using:
 | dplyr_1.1.2 | purrr_1.0.1 | readr_2.1.5 | tidyr_1.3.0 |
 | tibble_3.2.1 | ggplot2_3.4.4 | tidyverse_2.0.0 |
 
+## How to run
+You can run the <code>./code/2_analysis/analysis_demo.Rmd</code> using the demo data to achieve all statistical analyses and data visualization in the project.
+
+## License
+This project is available under the MIT license.
+
+## Contact
+Yan Luo - luo.yan@my.cityu.edu.hk
