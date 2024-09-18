@@ -16,6 +16,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # xx_data_processing.Rmd
 install.packages("tidyverse")
+install.packages("flextable")
+install.packages("glue")
 install.packages("haven")
 install.packages("sjlabelled")
 install.packages("mice")
@@ -25,12 +27,22 @@ install.packages("doParallel")
 # analysis.Rmd
 install.packages("readxl")
 install.packages("gtsummary")
+install.packages("miceadds")
+install.packages("data.table")
+install.packages("modelsummary")
+install.packages("broom.mixed")
 install.packages("forestploter")
 install.packages("ggplot2")
 install.packages("ggpubr")
 install.packages("ggtext")
+install.packages("ggsci")
 install.packages("lmerTest")
 install.packages("metafor")
+install.packages("marginaleffects")
+install.packages("gfoRmula")
+install.packages("geepack")
+install.packages("survival")
+install.packages("gt")
 
 ```
 
@@ -47,7 +59,6 @@ library(devtools)
 
 devtools::install_github("ropensci/skimr")
 devtools::install_github("thomasp85/patchwork")
-devtools::install_github("tidyverse/glue")
 
 ```
 

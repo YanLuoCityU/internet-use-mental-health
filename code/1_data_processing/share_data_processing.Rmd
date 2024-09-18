@@ -8,7 +8,7 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 # Make sure the working directory is "your path/internet-use-mental-health"
-knitr::opts_knit$set(root.dir = "D:/github_project/internet-use-mental-health")
+knitr::opts_knit$set(root.dir = "E:/Multiple cohort study/Harmonized Data FIile/HarmonizedSurveyData/internet_use_mental/internet-use-mental-health")
 
 library(tidyverse)
 library(haven)
@@ -16,6 +16,7 @@ library(sjlabelled)
 library(mice)
 library(tictoc)
 library(doParallel)
+library(gtsummary)
 
 ```
 
@@ -45,20 +46,23 @@ harm_share <- read_dta(paste(getwd(), "/data/raw/share/H_SHARE_f.dta", sep = "")
 ## Transform Harmonized_SHARE from wide format to long format
 wide_harm_share <- harm_share %>%
   select(
-    c(mergeid, hhid, pn, country, isocountry, ragender, raeducl)| # id, country, gender, education
+    c(mergeid, hhid, pn, country, isocountry, ragender, raeducl, radyear, radmonth)| # id, country, gender, education
       (starts_with("r") & (ends_with("iwy") | ends_with("iwm"))) | # Interview dates
       (starts_with("r") & (ends_with("agey") | ends_with("agem"))) | # Age
       (starts_with("h") & ends_with("atotb") & !contains("hh")) | # Household wealth
       (starts_with("r") & ends_with("lbrf_s")) | # Labor force status
       (starts_with("r") & (ends_with("smokev") | ends_with("smoken") | ends_with("drinkxw") | ends_with("vgactx") | ends_with("mdactx"))) | # Health behaviors
       (starts_with("r") & (ends_with("mstat"))) | # Marital status
-      (starts_with("h") & ends_with("hhres")) | # Household size
+      (starts_with("h") & (ends_with("hhres") | ends_with("child") | ends_with("kcnt"))) | # Household size, number of children, contact with other people
+      (starts_with("r") & (ends_with("livpar") | ends_with("pcnt"))) | # Number of living parents
       (starts_with("r") & (ends_with("hibpe") | ends_with("diabe") | ends_with("cancre") | ends_with("lunge") | ends_with("hearte") | ends_with("stroke") | ends_with("psyche") | ends_with("arthre") | ends_with("parkine"))) | # Chronic diseases
       (starts_with("r") & (ends_with("alzdeme"))) | # Memory-related diseases, Alzheimer’s disease, dementia
       (starts_with("r") & (ends_with("batha") | ends_with("eata") | ends_with("beda") | ends_with("toilta") | ends_with("walkra") | ends_with("dressa") | ends_with("adltot_s") | ends_with("adltotm_s"))) | # ADL
       (starts_with("r") & (ends_with("mapa") | ends_with("phonea") | ends_with("moneya") | ends_with("medsa") | ends_with("shopa") | ends_with("mealsa") | ends_with("housewka") | ends_with("iadltot1_s") | ends_with("iadltot1m_s"))) | # IADL
       (starts_with("r") & (ends_with("depress") | ends_with("pessim") | ends_with("suicid") | ends_with("guilt") | ends_with("sleep") | ends_with("intrst") | ends_with("irritb") | ends_with("appett") | ends_with("fatig") | ends_with("concnt") | ends_with("enjoym") | ends_with("tearfl") | ends_with("eurod"))) | # EURO-D
-      (starts_with("r") & ends_with("shlt")) # Self-reported health
+      (starts_with("r") & ends_with("shlt")) | # Self-reported health
+      (starts_with("h") & ends_with("kcnt")) | # Contact with other people
+      (starts_with("r") & ends_with("pcnt"))
      ) %>% 
   mutate(
     r3iwm = NA, r3agey = NA, r3agem = NA, 
@@ -71,11 +75,13 @@ wide_harm_share <- harm_share %>%
     r3smokev = NA, r3smoken = NA, r3drinkxw = NA, r3vgactx = NA, r3mdactx = NA, # Health behaviors
     r3mstat = NA,
     hh3hhres = NA, # Household size
+    h3child = NA, h3fchild = NA, h3grchild = NA, h3fgrchild = NA, r3livpar = NA, h3kcnt = NA, r3pcnt = NA, # Contact with other people
     r3hibpe = NA, r3diabe = NA, r3cancre = NA, r3lunge = NA, r3hearte = NA, r3stroke = NA, r1psyche = NA, r3psyche = NA, r3arthre = NA, r3parkine = NA, r1alzdeme = NA, r3alzdeme = NA, # Chronic diseases
     r3batha = NA, r3eata = NA, r3beda = NA, r3toilta = NA, r3walkra = NA, r3dressa = NA, r3adltot_s = NA, r3adltotm_s = NA, # ADL
     r3mapa = NA, r3phonea = NA, r3moneya = NA, r3medsa = NA, r3shopa = NA, r3mealsa = NA, r3housewka = NA, r3iadltot1_s = NA, r3iadltot1m_s = NA, # IADL
     r3depress = NA, r3pessim = NA, r3suicid = NA, r3guilt = NA, r3sleep = NA, r3intrst = NA, r3irritb = NA, r3appett = NA, r3fatig = NA, r3concnt = NA, r3enjoym = NA, r3tearfl = NA, r3eurod = NA, r3feurod = NA, # EURO-D
-    r3shlt = NA # Self-reported health
+    r3shlt = NA, # Self-reported health
+    h3kcnt = NA, r3pcnt = NA
   ) %>%
   dplyr::select(!c(r1rxsleep, r2rxsleep, r4rxsleep, r5rxsleep, r6rxsleep, r7rxsleep, r8rxsleep))
 
@@ -90,7 +96,7 @@ names_reorder <- names(wide_harm_share)[index_reorder] %>%
 long_share <- wide_harm_share %>% 
   select(!contains(names_reorder), contains(names_reorder)) %>%
     pivot_longer(
-    col = !c(mergeid, hhid, pn, country, isocountry, ragender, raeducl),
+    col = !c(mergeid, hhid, pn, country, isocountry, ragender, raeducl, radyear, radmonth),
     names_to = ".value",
     names_pattern = "[h-r]+[0-9]+(.*)"
   ) %>%
@@ -161,7 +167,8 @@ tidy_share <- long_merge %>%
   mutate(
     .keep = "none",
     ## Basic information
-    id = mergeid, cohort = "share", country = isocountry, iwy, iwm, wave, 
+    id = mergeid, cohort = "share", country = isocountry, iwy, iwm, wave,
+    radyear, radmonth,
     
     ## Exposure variables
     internet_yes = case_when(
@@ -191,6 +198,15 @@ tidy_share <- long_merge %>%
       ),
     nonmarried = relevel(factor(nonmarried), ref = "no"),
     hhres,
+    kcnt = ifelse(child == 0, 0, kcnt),
+    pcnt = ifelse(livpar == 0, 0, pcnt),
+    contact = case_when(
+      kcnt == 1 | pcnt == 1 ~ "yes",
+      is.na(kcnt) & is.na(pcnt) ~ NA_character_,
+      TRUE ~ "no"
+    ),
+    contact = relevel(factor(contact), ref = "no"),
+    kcnt = ifelse(kcnt == 1, "yes", "no"), kcnt = relevel(factor(kcnt), ref = "no"),
     
     # Socioeconomic status
     atotb, 
@@ -334,8 +350,10 @@ id_satlife_bl <- filter_iyes %>%
   ungroup() %>%
   pull(id)
 
-id_ot_bl <- intersect(id_cesd_bl, id_shlt_bl) # 82709
-id_ot_bl <- intersect(id_ot_bl, id_satlife_bl) # 82091
+id_ot_bl <- intersect(id_cesd_bl, id_satlife_bl) # 82117
+length(unique(id_ot_bl))
+id_ot_bl <- intersect(id_ot_bl, id_shlt_bl) # 82091
+length(unique(id_ot_bl))
 
 filter_ot_bl <- filter_iyes %>%
   filter(id %in% id_ot_bl)
@@ -403,8 +421,10 @@ id_satlife <- filter_2obs %>%
   ungroup() %>%
   pull(id)
 
-id_ot <- intersect(id_cesd, id_shlt) # 56042
-id_ot <- intersect(id_ot, id_satlife) # 55925
+id_ot <- intersect(id_cesd, id_satlife) # 55932
+length(unique(id_ot))
+id_ot <- intersect(id_ot, id_shlt) # 55925
+length(unique(id_ot))
 
 filter_ot <- filter_2obs %>%
   filter(id %in% id_ot)
@@ -426,7 +446,7 @@ length(unique(filter_nomental$id)) # 48971
 id_cov <- filter_nomental %>%
   rowwise() %>%
   mutate(
-    cov_miss = sum(is.na(c(age, male, atotb, lowedu, lbrf, nonmarried, hhres, smoken, weekdrink, phyinact, dis, adl_any, iadl)), na.rm = F)
+    cov_miss = sum(is.na(c(age, male, atotb, lowedu, lbrf, nonmarried, hhres, contact, smoken, weekdrink, phyinact, dis, adl_any, iadl)), na.rm = F)
   ) %>%
   ungroup() %>%
   mutate(
@@ -445,7 +465,7 @@ filter_cov_iyes <- filter_nomental %>%
     cesd = sum(c(depress, pessim, suicid, guilt, sleep, intrst, irritb, appett, fatig, concnt, enjoym, tearfl), na.rm = F)
   ) %>%
   ungroup()
-length(unique(filter_cov_iyes$id)) # 44523
+length(unique(filter_cov_iyes$id)) # 44518
 
 table(filter_cov_iyes %>% group_by(id) %>% summarise(count = n()) %>% pull(count))
 
@@ -461,7 +481,7 @@ bl <- filter_cov_iyes %>%
     .keep = "none",
     id, country, internet_yes, 
     age, male, lowedu, lbrf, atotb,
-    nonmarried, hhres, smoken, weekdrink, phyinact,
+    nonmarried, hhres, contact, smoken, weekdrink, phyinact,
     dis, adl_any, iadl
     ) %>%
   group_by(country) %>%
@@ -483,13 +503,13 @@ final <- filter_cov_iyes %>%
     id, country, iwy, iwm, wave,
     cesd, shlt, satlife, 
     cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife),
-    cwave
+    depression = ifelse(cesd >= 4, 1, 0), cwave
   ) %>%
   dplyr::select(
     id, country, iwy, iwm, wave,
     cesd, shlt, satlife,
     cesd_stand, shlt_stand, satlife_stand,
-    cwave
+    depression, cwave
   )
 
 final_iyes_share <- final %>% 
@@ -498,6 +518,179 @@ final_iyes_share <- final %>%
     id = str_c("share_", id)
   )
 
+```
+
+### Inverse probability weighting
+
+```{r}
+
+# All observations of all participants in the original data (baseline covariates + time-varying outcomes)
+bl <- tidy_share %>% 
+  group_by(id) %>% 
+  slice(1) %>%
+  ungroup() %>%
+  mutate(
+    .keep = "none",
+    id, country = factor(country), internet_yes, 
+    age, male, lowedu, atotb, lbrf, 
+    nonmarried, hhres, contact, smoken, weekdrink, phyinact,
+    dis, adl_any, iadl
+    )
+
+attr_ipw <- tidy_share %>% 
+  select(
+    id, wave,
+    depress, pessim, suicid, guilt, sleep, intrst, irritb, appett, fatig, concnt, enjoym, tearfl,
+    satlife, shlt
+  ) %>%
+  left_join(., bl, by = "id")
+
+# Construct attrition observations
+attr_obs <- tidy_share %>% 
+  group_by(id) %>%
+  slice(n()) %>%
+  ungroup() %>%
+  filter(wave != 2019) %>%
+  mutate(
+    wave = case_when(
+      wave == 2013 ~ 2015,
+      wave == 2015 ~ 2017,
+      wave == 2017 ~ 2019,
+      TRUE ~ NA_real_
+    ),
+    attrition = 1
+  ) %>% 
+  select(
+    id, wave, attrition
+  )
+
+# Multiple imputation
+predictorMatrix <- matrix(0, nrow = dim(attr_ipw)[2], ncol = dim(attr_ipw)[2])
+colnames(predictorMatrix) <- colnames(attr_ipw)
+rownames(predictorMatrix) <- colnames(attr_ipw)
+row_pre <- which(rownames(predictorMatrix) %in% colnames(attr_ipw)[-c(1:2)])
+col_pre <- which(colnames(predictorMatrix) %in% colnames(attr_ipw)[-c(1:2)])
+predictorMatrix[row_pre, col_pre] <- 1
+for(i in 3:dim(attr_ipw)[2]){ predictorMatrix[i,i]<-0 }
+
+cores <- detectCores()
+tic()
+mi_attr_ipw <- attr_ipw %>%
+  futuremice(data = ., m = 10, maxit = 5, predictorMatrix = predictorMatrix, parallelseed = 12345, n.core = cores - 1)
+toc() # 40 min
+
+
+attr_ipw <- attr_ipw %>%
+  mutate(
+      attrition = 0
+    ) %>%
+  bind_rows(., attr_obs) %>%
+  arrange(id, wave) %>%
+  mutate(
+    propensity_num1 = NA, propensity_num2 = NA, propensity_num3 = NA, 
+    propensity_num4 = NA, propensity_num5 = NA, propensity_num6 = NA,
+    propensity_num7 = NA, propensity_num8 = NA, propensity_num9 = NA,
+    propensity_num10 = NA,
+    propensity_denom1 = NA, propensity_denom2 = NA, propensity_denom3 = NA, 
+    propensity_denom4 = NA, propensity_denom5 = NA, propensity_denom6 = NA, 
+    propensity_denom7 = NA, propensity_denom8 = NA, propensity_denom9 = NA, 
+    propensity_denom10 = NA
+  ) %>%
+  group_by(id) %>%
+  mutate(
+    fisrt = first(wave),
+    cwave = wave - fisrt
+  ) %>%
+  ungroup()
+
+# Calculate the probability of included in the analysis using five imputed datasets
+for(i in 1:10){
+  mi_data <- mice::complete(mi_attr_ipw, i)
+  
+  mi_bl <- mi_data %>%
+    group_by(id) %>% 
+    slice(1) %>%
+    ungroup() %>%
+    mutate(
+      .keep = "none",
+      id, country = factor(country), internet_yes, 
+      age, male, lowedu, atotb, lbrf, 
+      nonmarried, hhres, contact, smoken, weekdrink, phyinact,
+      dis, adl_any, iadl
+      )
+  
+  mi_obs <- attr_obs %>%
+    left_join(., mi_bl, by = "id")
+  
+  mi_data <- mi_data %>%
+    mutate(
+      attrition = 0
+    ) %>%
+    bind_rows(., mi_obs) %>%
+    arrange(id, wave) %>%
+    rowwise() %>%
+    mutate(
+      cesd = sum(c(depress, pessim, suicid, guilt, sleep, intrst, irritb, appett, fatig, concnt, enjoym, tearfl), na.rm = F)
+    ) %>%
+    ungroup() %>%
+    mutate(
+      lowwealth = factor(reverse_code(ntile(atotb, 3)))
+    ) %>%
+    group_by(id) %>%
+    mutate(
+      fisrt = first(wave),
+      cwave = wave - fisrt,
+      lag_cesd = lag(cesd, default = first(0)),
+      lag_satlife = lag(satlife, default = first(0)),
+      lag_shlt = lag(shlt, default = first(0))
+    ) %>%
+    ungroup()
+  
+  model_num <- glm(attrition ~ country + internet_yes + age + male + 
+                     lowedu + lowwealth + lbrf + nonmarried + hhres + contact + 
+                     smoken + weekdrink + phyinact + dis + adl_any + iadl, 
+                   data = mi_data, family = binomial(link = "logit"))
+  
+  model_denom <- glm(attrition ~ country + internet_yes + age + male + 
+                       lowedu + lowwealth + lbrf + nonmarried + hhres + contact + 
+                       smoken + weekdrink + phyinact + dis + adl_any + iadl + 
+                       lag_cesd + lag_satlife + lag_shlt, 
+                     data = mi_data, family = binomial(link = "logit"))
+  
+  # Propensity scores from the models
+  attr_ipw[, paste0("propensity_num", i)] <- model_num$fitted.values
+  attr_ipw[, paste0("propensity_denom", i)] <- model_denom$fitted.values
+  
+  rm(mi_data, mi_bl, mi_obs, model_num, model_denom)
+}
+
+
+# Combine weights
+attr_ipw <- attr_ipw %>% 
+  rowwise() %>%
+  # Propensity scores from the models
+  mutate(
+    propensity_num = mean(c_across(propensity_num1:propensity_num10)),
+    propensity_denom = mean(c_across(propensity_denom1:propensity_denom10)),
+    ) %>% 
+  ungroup() %>%
+  # Probability of observed outcome
+  mutate(
+    propensity_num_outcome = ifelse(attrition == 1, propensity_num, 1 - propensity_num),
+    propensity_denom_outcome = ifelse(attrition == 1, propensity_denom, 1 - propensity_denom)
+    ) %>% 
+  # Numerator / denominator
+  mutate(weights_no_time = propensity_num_outcome / propensity_denom_outcome) %>%
+  group_by(id) %>% 
+  mutate(attrition_ipw = cumprod(weights_no_time)) %>% 
+  ungroup() %>%
+  mutate(
+    id = str_c("share_", id)
+  )
+
+final_iyes_share <- final_iyes_share %>%
+  left_join(., attr_ipw %>% select(id, wave, attrition_ipw), by = c("id", "wave"))
+
 rm(bl, final)
 rm(list = ls()[str_detect(string = ls(), pattern = "id_")])
 object <- ls()[str_detect(string = ls(), pattern = "filter_")]
@@ -505,11 +698,159 @@ rm(list = object[!object %in% "filter_cov_iyes"])
 
 ```
 
+### Internet use and incident depression
+
+```{r}
+
+length(unique(final_iyes_share$id)) # 44518
+
+# Keep participants without depression at baseline
+final_iyes_inc <- final_iyes_share %>%
+  group_by(id) %>%
+  filter(first(depression == 0)) %>%
+  mutate(
+    has_depression = any(depression == 1, na.rm = T)
+  ) %>%
+  ungroup()
+length(unique(final_iyes_inc$id)) # 35143
+
+# Date of baseline
+final_iyes_inc_bl <- final_iyes_inc %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  mutate(
+    iwy_bl = iwy, iwm_bl = iwm
+  )
+
+# Date of the first occurrence of depression
+final_iyes_inc_dep <- final_iyes_inc %>%
+  filter(has_depression == T) %>%
+  filter(depression == 1) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup()
+
+# Date of the last observation
+final_iyes_inc_nodep <- final_iyes_inc %>%
+  filter(has_depression == F) %>%
+  group_by(id) %>%
+  slice(n()) %>%
+  ungroup()
+
+# Final dataset
+final_iyes_inc_share <- bind_rows(final_iyes_inc_dep, final_iyes_inc_nodep) %>%
+  left_join(final_iyes_inc_bl %>% select(id, iwy_bl, iwm_bl), by = "id") %>%
+  rowwise() %>%
+  mutate(
+    cmonth = iwy*12 + iwm - iwy_bl*12 - iwm_bl
+  ) %>%
+  ungroup()
+
+rm(final_iyes_inc, final_iyes_inc_bl, final_iyes_inc_dep, final_iyes_inc_nodep)
+
+```
+
+
+### Supplementary Table 5: compare baseline characteristic between analytic samples and whole samples
+
+```{r}
+
+all <- tidy_share %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  mutate(
+    .keep = "none",
+    internet_yes, 
+    age, male, lowedu, atotb, lbrf, 
+    nonmarried, hhres, contact, smoken, weekdrink, phyinact,
+    dis, adl_any, iadl, sample = "original"
+  )
+
+analytic <- filter_cov_iyes %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  mutate(
+    .keep = "none",
+    internet_yes, 
+    age, male, lowedu, atotb, lbrf, 
+    nonmarried, hhres, contact, smoken, weekdrink, phyinact,
+    dis, adl_any, iadl, sample = "analytic"
+  )
+
+data <- bind_rows(all, analytic)
+
+var_need <- c("internet_yes", "age", "male", "lowedu", "atotb", "lbrf", "nonmarried", "hhres", "contact", "smoken", "weekdrink", "phyinact", "dis", "adl_any", "iadl")
+
+var_name <- c(
+  "Internet use",
+  
+  "Age (years)",
+  "Male",
+  "Education",
+  "Wealth",
+  "Labor force status",
+
+  "Unmarried",  
+  "Household size",
+  "Weekly contact with other people",
+  "Current smoker",
+  "Weekly alcohol use",
+  "Physical inactivity",
+  
+  "Number of chronic conditions",
+  "ADL disability", 
+  "IADL"
+)
+
+label_list <- list()
+for (i in 1:length(var_name)) {
+  formula_str <- paste0(var_need[i], " ~ ", "\"", gsub("'", "'", var_name[i]), "\"")
+  label_list[[i]] <- as.formula(formula_str)
+}
+
+tbl <- data %>%
+  mutate(
+    male = relevel(factor(male, labels = c("no", "yes")), ref = "no"),
+    lowedu = factor(lowedu, levels = c("primary", "secondary", "tertiary"), labels = c("Primary", "Secondary", "Tertiary")),
+    # lowwealth = factor(lowwealth, levels = c("3", "2", "1"), labels = c("Low", "Middle", "High")),
+    lbrf = factor(lbrf, levels = c("employed", "retired", "others"), labels = c("Working", "Retired", "Others"))
+  ) %>%
+  tbl_summary(
+    by = sample,
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      atotb ~ "{median} ({p25}, {p75})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    label = label_list,
+    type = list(hhres ~ "continuous", dis ~ "continuous", iadl ~ "continuous"),
+    digits = list(all_continuous() ~ 1, all_categorical() ~ c(0, 1)),
+    missing = "no"
+    ) %>%
+  add_p(pvalue_fun = function(x) style_pvalue(x, digits = 3))
+
+tbl %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path = str_c(getwd(), "/results/Table/Supplementary Table 5_Differences in baseline characteristics between analytic and whole samples_SHARE.docx"))
+
+table <- table(data$sample, data$male)
+chisq.test(table, correct = F)
+
+wilcox.test(
+  data %>% filter(sample=="original") %>% pull(age),
+  data %>% filter(sample=="analytic") %>% pull(age),
+  exact = F)
+
+```
+
 ## Cumulative Internet use
 
 ```{r}
 
-# Keep participants aged >=51 years
+# Keep participants aged >=50 years
 id_50plus <- tidy_share %>%
   group_by(id) %>%
   slice(1) %>%
@@ -585,8 +926,10 @@ id_satlife_2w <- filter_2iobs %>%
   ungroup() %>%
   pull(id)
 
-id_ot_2w <- intersect(id_cesd_2w, id_shlt_2w) # 47756
-id_ot_2w <- intersect(id_ot_2w, id_satlife_2w) # 47511
+id_ot_2w <- intersect(id_cesd_2w, id_satlife_2w) # 47525
+length(unique(id_ot_2w))
+id_ot_2w <- intersect(id_ot_2w, id_shlt_2w) # 47511
+length(unique(id_ot_2w))
 
 filter_ot_2w <- filter_2iobs %>%
   filter(id %in% id_ot_2w)
@@ -654,8 +997,10 @@ id_satlife <- filter_3obs %>%
   ungroup() %>%
   pull(id)
 
-id_ot <- intersect(id_cesd, id_shlt) # 27592
-id_ot <- intersect(id_ot, id_satlife) # 27534
+id_ot <- intersect(id_cesd, id_satlife) # 27534
+length(unique(id_ot))
+id_ot <- intersect(id_ot, id_shlt) # 27534
+length(unique(id_ot))
 
 filter_ot <- filter_3obs %>%
   filter(id %in% id_ot)
@@ -677,7 +1022,7 @@ length(unique(filter_nomental$id)) # 23152
 id_cov <- filter_nomental %>%
   rowwise() %>%
   mutate(
-    cov_miss = sum(is.na(c(age, male, atotb, lowedu, lbrf, nonmarried, hhres, smoken, weekdrink, phyinact, dis, adl_any, iadl)), na.rm = F)
+    cov_miss = sum(is.na(c(age, male, atotb, lowedu, lbrf, nonmarried, hhres, contact, smoken, weekdrink, phyinact, dis, adl_any, iadl)), na.rm = F)
   ) %>%
   ungroup() %>%
   mutate(
@@ -696,7 +1041,7 @@ filter_cov <- filter_nomental %>%
     cesd = sum(c(depress, pessim, suicid, guilt, sleep, intrst, irritb, appett, fatig, concnt, enjoym, tearfl), na.rm = F)
   ) %>%
   ungroup()
-length(unique(filter_cov$id)) # 21137
+length(unique(filter_cov$id)) # 21135
 
 table(filter_cov %>% group_by(id) %>% summarise(count = n()) %>% pull(count))
 
@@ -705,7 +1050,7 @@ table(filter_cov %>% group_by(id) %>% slice(1) %>% ungroup() %>% pull(country))
 
 filter_cov <- filter_cov %>%
   filter(!country %in% c(300, 616))
-length(unique(filter_cov$id)) # 21133
+length(unique(filter_cov$id)) # 21131
 
 # Final
 icum <- filter_cov %>%
@@ -731,7 +1076,7 @@ bl <- filter_cov %>%
     .keep = "none",
     id, country, 
     age, male, lowedu, lbrf, atotb,
-    nonmarried, hhres, smoken, weekdrink, phyinact,
+    nonmarried, hhres, contact, smoken, weekdrink, phyinact,
     dis, adl_any, iadl
     ) %>%
   group_by(country) %>%
@@ -755,27 +1100,225 @@ final <- filter_cov %>%
     id, country, iwy, iwm, wave, 
     cesd, shlt, satlife, 
     cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife),
-    cwave
+    depression = ifelse(cesd >= 4, 1, 0), cwave
   ) %>%
   dplyr::select(
     id, country, iwy, iwm, wave,
     cesd, shlt, satlife,
     cesd_stand, shlt_stand, satlife_stand,
-    cwave
+    depression, cwave
   )
 
 final_icum_share <- final %>% 
   left_join(., bl, by = "id") %>%
   mutate(
     id = str_c("share_", id)
-  )
+  ) %>%
+  left_join(., attr_ipw %>% select(id, wave, attrition_ipw), by = c("id", "wave"))
+
+icum_gformula_share <- filter_cov %>%
+  group_by(id) %>%
+  mutate(wave_num = row_number()-1) %>%
+  ungroup() %>%
+  select(
+    id, country, wave_num, internet_yes, age, male, lowedu, atotb, lbrf, 
+    nonmarried, hhres, contact, smoken, weekdrink, phyinact,
+    dis, adl_any, iadl,
+    cesd, satlife, shlt
+    ) #%>%
+  # left_join(., attr_ipw %>% select(id, wave, attrition_ipw), by = c("id", "wave"))
 
 rm(icum, bl, final)
 rm(list = ls()[str_detect(string = ls(), pattern = "id_")])
-object <- ls()[str_detect(string = ls(), pattern = "filter_")]
-rm(list = object[!object %in% "filter_cov_iyes"])
+rm(list = ls()[str_detect(string = ls(), pattern = "filter_")])
 
 ```
+
+## Bidirectional association: mental health and Internet use
+
+```{r}
+
+# Keep participants aged >=50 years
+id_50plus <- tidy_share %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  filter(age >= 50) %>%
+  pull(id)
+
+filter_50plus <- tidy_share %>%
+  filter(id %in% id_50plus)
+length(unique(filter_50plus$id)) # 107044
+
+# Keep participants with complete data on internet use at baseline
+id_iyes_bl <- filter_50plus %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  filter(!is.na(internet_yes)) %>%
+  pull(id)
+
+filter_iyes_bl <- filter_50plus %>%
+  filter(id %in% id_iyes_bl)
+length(unique(filter_iyes_bl$id)) # 85946
+
+# Keep participants with complete data on outcomes at baseline
+## Depressive symptoms
+id_cesd_bl <- filter_iyes_bl %>%
+  rowwise() %>%
+  mutate(
+    cesd_miss = sum(is.na(c(depress, pessim, suicid, guilt, sleep, intrst, irritb, appett, fatig, concnt, enjoym, tearfl)), na.rm = F)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    with_cesd = ifelse(cesd_miss == 0, 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  filter(with_cesd == 1) %>% 
+  ungroup() %>%
+  pull(id)
+
+## Self-rated health
+id_shlt_bl <- filter_iyes_bl %>%
+  mutate(
+    with_shlt = ifelse(!is.na(shlt), 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  filter(with_shlt == 1) %>% 
+  ungroup() %>%
+  pull(id)
+
+## Life satisfaction
+id_satlife_bl <- filter_iyes_bl %>%
+  mutate(
+    with_satlife = ifelse(!is.na(satlife), 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  filter(with_satlife == 1) %>% 
+  ungroup() %>%
+  pull(id)
+
+id_ot_bl <- intersect(id_cesd_bl, id_satlife_bl) # 82117
+length(unique(id_ot_bl))
+id_ot_bl <- intersect(id_ot_bl, id_shlt_bl) # 82091
+length(unique(id_ot_bl))
+
+filter_ot_bl <- filter_iyes_bl %>%
+  filter(id %in% id_ot_bl)
+length(unique(filter_ot_bl$id)) # 82091
+
+# Keep participants with at least one-wave complete data on internet use over follow-ups
+id_2obs <- filter_ot_bl %>%
+  group_by(id) %>%
+  filter(n() >= 2) %>%
+  dplyr::slice(1) %>%
+  ungroup() %>%
+  pull(id)
+
+filter_2obs <- filter_ot_bl %>%
+  filter(id %in% id_2obs)
+length(unique(filter_2obs$id)) # 64448
+
+id_iyes <- filter_2obs %>%
+  mutate(
+    with_iyes = ifelse(!is.na(internet_yes), 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(2:n()) %>%
+  mutate(
+    t_with_iyes = cumsum(with_iyes)
+    ) %>%
+  slice(n()) %>%
+  filter(t_with_iyes >= 1) %>% 
+  ungroup() %>%
+  pull(id)
+
+filter_iyes <- filter_2obs %>%
+  filter(id %in% id_iyes)
+length(unique(filter_iyes$id)) # 57528
+
+# Keep participants without dementia and psychological diseases at baseline
+id_mental <- filter_iyes %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  filter(parkine == "yes" | alzdeme == "yes" | psyche == "yes") %>%
+  pull(id)
+
+filter_nomental <- filter_iyes %>%
+  filter(!id %in% id_mental) 
+length(unique(filter_nomental$id)) # 50191
+
+# Keep participants with complete data on covariates at baseline
+id_cov <- filter_nomental %>%
+  rowwise() %>%
+  mutate(
+    cov_miss = sum(is.na(c(age, male, atotb, lowedu, lbrf, nonmarried, hhres, contact, smoken, weekdrink, phyinact, dis, adl_any, iadl)), na.rm = F)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    with_cov = ifelse(cov_miss == 0, 1, 0)
+  ) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  filter(with_cov == 1) %>%
+  pull(id)
+
+filter_cov <- filter_nomental %>%
+  filter(id %in% id_cov) %>%
+  rowwise() %>%
+  mutate(
+    cesd = sum(c(depress, pessim, suicid, guilt, sleep, intrst, irritb, appett, fatig, concnt, enjoym, tearfl), na.rm = F)
+  ) %>%
+  ungroup()
+length(unique(filter_cov$id)) # 45609
+
+table(filter_cov %>% group_by(id) %>% summarise(count = n()) %>% pull(count))
+
+# Final dataset
+## Replace with the baseline values
+bl <- filter_cov %>% 
+  group_by(id) %>% 
+  slice(1) %>%
+  ungroup() %>%
+  mutate(
+    .keep = "none",
+    id, cesd, satlife, shlt,
+    cesd_stand = scale(cesd), satlife_stand = scale(satlife), shlt_stand = scale(shlt), 
+    age, male, lowedu, lowwealth = factor(reverse_code(ntile(atotb, 3))), lbrf, 
+    nonmarried, hhres, contact, smoken, weekdrink, phyinact,
+    dis, adl_any, iadl
+    )
+
+final <- filter_cov %>%
+  group_by(id) %>%
+  mutate(
+    fisrt = first(wave),
+    cwave = wave - fisrt
+  ) %>%
+  ungroup() %>%
+  dplyr::select(
+    id, country, iwy, iwm, wave,
+    internet_yes, cwave
+  )
+
+final_bidirec_share <- final %>% 
+  left_join(., bl, by = "id") %>%
+  mutate(
+    id = str_c("share_", id)
+  )
+
+rm(bl, final)
+rm(list = ls()[str_detect(string = ls(), pattern = "id_")])
+rm(list = ls()[str_detect(string = ls(), pattern = "filter_")])
+
+```
+
+
 
 # Subgroup analyses: Internet use (yes/no)
 
@@ -838,6 +1381,28 @@ married_iyes_share <- final_iyes_share %>%
 # Unmarried
 nonmarried_iyes_share <- final_iyes_share %>%
   filter(nonmarried == "yes") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+```
+
+## By weekly contact
+
+```{r}
+
+# Weekly contact with other people
+contact_iyes_share <- final_iyes_share %>%
+  filter(contact == "yes") %>%
+  select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
+  mutate(
+    cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+  )
+
+# No weekly contact
+nocontact_iyes_share <- final_iyes_share %>%
+  filter(contact == "no") %>%
   select(!c(cesd_stand, shlt_stand, satlife_stand)) %>%
   mutate(
     cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
@@ -1054,7 +1619,7 @@ nodis_iyes_share <- final_iyes_share %>%
 ```{r}
 
 final_mi_iyes <- final_iyes_share %>%
-  dplyr::select(!c(cesd_stand, shlt_stand, satlife_stand))
+  dplyr::select(!c(cesd_stand, shlt_stand, satlife_stand, depression))
 
 # Setting MICE arguments
 predictorMatrix <- matrix(0, nrow = dim(final_mi_iyes)[2], ncol = dim(final_mi_iyes)[2])
@@ -1068,21 +1633,63 @@ for(i in 6:dim(final_mi_iyes)[2]){ predictorMatrix[i,i]<-0 }
 cores <- detectCores()
 tic()
 mi_iyes <- final_mi_iyes %>%
-  futuremice(data = ., m = 20, maxit = 5, predictorMatrix = predictorMatrix, parallelseed = 12345, n.core = cores - 1)
+  futuremice(data = ., m = 10, maxit = 5, predictorMatrix = predictorMatrix, parallelseed = 12345, n.core = cores - 1)
 toc()
 
 mi_iyes_share <- list()
-
-for(i in 1:20){
+for(i in 1:10){
   mi_data <- mice::complete(mi_iyes, i) %>%
     mutate(
-      cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+      cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife),
+      depression = ifelse(cesd >= 4, 1, 0)
     )
   
   mi_iyes_share[[i]] <- mi_data
   
   rm(mi_data)
 }
+
+mi_iyes_inc_share <- list()
+for(i in 1:10){
+  mi_data <- mice::complete(mi_iyes, i) %>%
+    mutate(depression = ifelse(cesd >= 4, 1, 0)) %>%
+    group_by(id) %>%
+    filter(first(depression == 0)) %>%
+    mutate(
+      has_depression = any(depression == 1, na.rm = T)
+    ) %>%
+    ungroup()
+  
+  mi_data_bl <- mi_data %>%
+    group_by(id) %>%
+    slice(1) %>%
+    ungroup() %>%
+    mutate(iwy_bl = iwy, iwm_bl = iwm)
+  
+  mi_data_dep <- mi_data %>%
+    filter(has_depression == T) %>%
+    filter(depression == 1) %>%
+    group_by(id) %>%
+    slice(1) %>%
+    ungroup()
+  
+  mi_data_nodep <- mi_data %>%
+    filter(has_depression == F) %>%
+    group_by(id) %>%
+    slice(n()) %>%
+    ungroup()
+  
+  mi_iyes_inc_share[[i]] <- bind_rows(mi_data_dep, mi_data_nodep) %>%
+    left_join(mi_data_bl %>% select(id, iwy_bl, iwm_bl), by = "id") %>%
+    rowwise() %>%
+    mutate(
+      cmonth = iwy*12 + iwm - iwy_bl*12 - iwm_bl
+    ) %>%
+    ungroup()
+  
+  rm(mi_data, mi_data_bl, mi_data_dep, mi_data_nodep)
+}
+
 
 ```
 
@@ -1091,7 +1698,7 @@ for(i in 1:20){
 ```{r}
 
 final_mi_icum <- final_icum_share %>%
-  dplyr::select(!c(cesd_stand, shlt_stand, satlife_stand))
+  dplyr::select(!c(cesd_stand, shlt_stand, satlife_stand, depression))
 
 # Setting MICE arguments
 predictorMatrix <- matrix(0, nrow = dim(final_mi_icum)[2], ncol = dim(final_mi_icum)[2])
@@ -1105,18 +1712,95 @@ for(i in 6:dim(final_mi_icum)[2]){ predictorMatrix[i,i]<-0 }
 cores <- detectCores()
 tic()
 mi_icum <- final_mi_icum %>%
-  futuremice(data = ., m = 20, maxit = 5, predictorMatrix = predictorMatrix, parallelseed = 12345, n.core = cores - 1)
+  futuremice(data = ., m = 10, maxit = 5, predictorMatrix = predictorMatrix, parallelseed = 12345, n.core = cores - 1)
 toc()
 
 mi_icum_share <- list()
 
-for(i in 1:20){
+for(i in 1:10){
   mi_data <- mice::complete(mi_icum, i) %>%
     mutate(
-      cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife)
+      cesd_stand = scale(cesd), shlt_stand = scale(shlt), satlife_stand = scale(satlife),
+      depression = ifelse(cesd >= 4, 1, 0)
     )
   
   mi_icum_share[[i]] <- mi_data
+  
+  rm(mi_data)
+}
+
+```
+
+### G-formula
+
+```{r}
+
+predictorMatrix <- matrix(0, nrow = dim(icum_gformula_share)[2], ncol = dim(icum_gformula_share)[2])
+colnames(predictorMatrix) <- colnames(icum_gformula_share)
+rownames(predictorMatrix) <- colnames(icum_gformula_share)
+row_pre <- which(rownames(predictorMatrix) %in% colnames(icum_gformula_share)[-c(1:3)])
+col_pre <- which(colnames(predictorMatrix) %in% colnames(icum_gformula_share)[-c(1:3)])
+predictorMatrix[row_pre, col_pre] <- 1
+for(i in 4:dim(icum_gformula_share)[2]){ predictorMatrix[i,i]<-0 }
+
+cores <- detectCores()
+tic()
+mi_icum_gformula <- icum_gformula_share %>%
+  futuremice(data = ., m = 10, maxit = 5, predictorMatrix = predictorMatrix, parallelseed = 12345, n.core = cores - 1)
+toc()
+
+mi_icum_gformula_share <- list()
+tic()
+for(i in 1:10){
+  mi_data <- mice::complete(mi_icum_gformula, i) %>%
+    mutate(
+      lowwealth = factor(reverse_code(ntile(atotb, 3))),
+      cesd_stand = scale(cesd), satlife_stand = scale(satlife), shlt_stand = scale(shlt)
+      ) %>%
+    mutate_if(is.factor, as.numeric) %>%
+    mutate_at(
+      vars(internet_yes, male, lowedu, lowwealth, lbrf, nonmarried, contact, 
+           smoken, weekdrink, phyinact, adl_any),
+      ~ . -1)
+  
+  mi_icum_gformula_share[[i]] <- mi_data
+  
+  rm(mi_data)
+}
+toc()
+
+```
+
+## Bidirectional association: mental health and Internet use
+
+```{r}
+
+final_mi_bidirec <- final_bidirec_share %>%
+  dplyr::select(!c(cesd_stand, shlt_stand, satlife_stand))
+
+# Setting MICE arguments
+predictorMatrix <- matrix(0, nrow = dim(final_mi_bidirec)[2], ncol = dim(final_mi_bidirec)[2])
+colnames(predictorMatrix) <- colnames(final_mi_bidirec)
+rownames(predictorMatrix) <- colnames(final_mi_bidirec)
+row_pre <- which(rownames(predictorMatrix) %in% colnames(final_mi_bidirec)[-c(1:5)])
+col_pre <- which(colnames(predictorMatrix) %in% colnames(final_mi_bidirec)[-c(1:5)])
+predictorMatrix[row_pre, col_pre] <- 1
+for(i in 6:dim(final_mi_bidirec)[2]){ predictorMatrix[i,i]<-0 }
+
+cores <- detectCores()
+tic()
+mi_bidirec <- final_mi_bidirec %>%
+  futuremice(data = ., m = 10, maxit = 5, predictorMatrix = predictorMatrix, parallelseed = 12345, n.core = cores - 1)
+toc()
+
+mi_bidirec_share <- list()
+for(i in 1:10){
+  mi_data <- mice::complete(mi_bidirec, i) %>%
+    mutate(
+      cesd_stand = scale(cesd), satlife_stand = scale(satlife), shlt_stand = scale(shlt)
+    )
+  
+  mi_bidirec_share[[i]] <- mi_data
   
   rm(mi_data)
 }
@@ -1129,16 +1813,18 @@ for(i in 1:20){
 ```{r}
 
 save(
-  final_iyes_share, final_icum_share, # Main analyses
+  final_iyes_share, final_icum_share, final_iyes_inc_share, 
+  icum_gformula_share, final_bidirec_share, # Complete cases
   middle_iyes_share, old_iyes_share, male_iyes_share, female_iyes_share,
+  married_iyes_share, nonmarried_iyes_share, contact_iyes_share, nocontact_iyes_share,
   pedu_iyes_share, sedu_iyes_share, tedu_iyes_share,
   lwealth_iyes_share, mwealth_iyes_share, hwealth_iyes_share,
   work_iyes_share, retired_iyes_share, others_iyes_share,
   smoke_iyes_share, nosmoke_iyes_share, drink_iyes_share, nodrink_iyes_share,
-  married_iyes_share, nonmarried_iyes_share,
   phyinact_iyes_share, phyact_iyes_share, adl_iyes_share, noadl_iyes_share,
   dis_iyes_share, nodis_iyes_share, # Subgroup analyses
-  mi_iyes_share, mi_icum_share, # Multiple imputation analyses
+  mi_iyes_share, mi_icum_share, mi_iyes_inc_share, 
+  mi_icum_gformula_share, mi_bidirec_share, # Multiple imputation analyses
   file = str_c(getwd(), "/data/processed/share_processed_data.RData", sep = "")
   )
 
