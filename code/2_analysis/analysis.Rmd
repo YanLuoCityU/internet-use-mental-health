@@ -17,6 +17,7 @@ library(skimr)
 library(mice)
 library(miceadds)
 library(gtsummary)
+library(glue)
 library(gt)
 library(tictoc)
 library(data.table)
@@ -10515,7 +10516,6 @@ dat <- dat_middle %>%
     estimate_p.sig = str_c(estimate_text, p.sig),
     overall_p.sig = ifelse(country == "Overall", estimate_p.sig, NA)
   )
-dat[dat$country == "Overall" & dat$subgroup %in% c("Unmarried", "Working", "Physical inactivity"), "overall_p.sig"] <- dat[dat$country == "Overall" & dat$subgroup %in% c("Unmarried", "Working", "Physical inactivity"), "estimate_text"]
 
 #### Plot ####
 rect_satlife <- ggplot(dat, aes(x = subgroup, y = country_italic, fill = estimate_new)) +
