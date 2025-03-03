@@ -1,6 +1,8 @@
 # Positive association between Internet use and mental health among adults aged ≥50 years in 23 countries
 
-This is the code repository for the paper "Positive association between Internet use and mental health among adults aged ≥50 years in 23 countries". It contains directories for code and data.
+![](image.png)
+
+This is the code repository for the paper "[Positive association between Internet use and mental health among adults aged ≥50 years in 23 countries](https://www.nature.com/articles/s41562-024-02048-7)". It contains directories for code and data.
 
 ## Directory
 ### code
